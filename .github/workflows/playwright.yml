@@ -39,8 +39,17 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      # Cache Playwright Chromium binary (~130MB) so it takes 0s on cache hit
+      - name: Cache Playwright Browsers
+        id: cache-playwright
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
       - name: Install Playwright Browsers
-        run: pnpm exec playwright install --with-deps chromium
+        if: steps.cache-playwright.outputs.cache-hit != 'true'
+        run: pnpm exec playwright install chromium
 
       - uses: actions/setup-python@v5
         with:
