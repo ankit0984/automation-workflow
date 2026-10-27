@@ -170,7 +170,7 @@ jobs:
           GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
           PYTHONUNBUFFERED: '1'
           FORCE_COLOR: '1'
-        run: pnpm exec playwright test src/tests/autoCaptchaDownload.spec.js --project=chromium --reporter=list
+        run: pnpm exec playwright test src/tests/autoCaptchaDownload.spec.js --project=chromium --reporter=list --retries=0
 
       - name: Upload downloaded PDFs
         if: ${{ !cancelled() }}
