@@ -462,6 +462,8 @@ test('Form Automation & Statutory Report Downloader with AI Captcha Solver', asy
       console.log(`📁 Target folder: ${targetDir}`);
       console.log(`======================================================`);
 
+      let districtDownloadedCount = 0;
+
       // Select District
       await page.getByLabel('District').selectOption(district.value);
 
@@ -679,7 +681,7 @@ test('Form Automation & Statutory Report Downloader with AI Captcha Solver', asy
               syncKpiHtml(allRecords);
 
               console.log(`  🏷️ Saved verified image: ${permanentFilename} ➔ Label: "${predictedText}" [Total: ${allRecords.length}]`);
-              await sendTelegram(`✅ <b>[${district.label}]</b> ${ac.label}\n📄 <code>${filename}</code>\n🤖 CAPTCHA: <code>${predictedText}</code>\n📊 Total: <b>${allRecords.length}</b>`);
+              districtDownloadedCount++;
 
               break; // Success! Exit retry loop
             } catch (downloadErr) {
@@ -705,11 +707,15 @@ test('Form Automation & Statutory Report Downloader with AI Captcha Solver', asy
       }
 
       console.log(`\n🎉 Finished District: ${district.label}`);
-      await sendTelegram(`🎉 <b>Finished District [${dIdx + 1}/${districtList.length}]:</b> ${district.label}`);
+      await sendTelegram(
+        `🏛️ <b>Completed District [${dIdx + 1}/${districtList.length}]:</b> ${district.label}\n` +
+        `📥 Downloaded: <b>${districtDownloadedCount}/${acList.length}</b> ACs\n` +
+        `📊 Overall Total: <b>${allRecords.length}</b> PDFs`
+      );
     }
 
     console.log('\n🏁 Finished processing all Districts, Assembly Constituencies, and Dates!');
-    await sendTelegram(`🏁 <b>All Statutory Reports Downloaded!</b>\n📊 Total Verified PDFs: <b>${allRecords.length}</b>`);
+    await sendTelegram(`🏁 <b>All Statutory Reports Downloaded!</b>\n📊 Total Verified PDFs: <b>${allRecords.length}</b>\n🔄 Syncing to Excel & Google Sheets...`);
 
     // Post-download validation and data extraction
     if (FORM_TYPE === 'form10') {
@@ -733,6 +739,7 @@ test('Form Automation & Statutory Report Downloader with AI Captcha Solver', asy
       }
 
       console.log('\n✅ Form 10 verification and data extraction pipeline completed successfully!');
+      await sendTelegram(`✅ <b>Pipeline Completed Successfully!</b>\n📊 Form 10 database extracted & synced.\n🎉 Reports ready for review.`);
     }
   } finally {
     // Always stop the in-memory Python worker process when the test concludes
