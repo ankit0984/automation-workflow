@@ -156,7 +156,9 @@ jobs:
           PROXY_SERVER: ${{ secrets.PROXY_SERVER }}
           PROXY_USERNAME: ${{ secrets.PROXY_USERNAME }}
           PROXY_PASSWORD: ${{ secrets.PROXY_PASSWORD }}
-        run: pnpm exec playwright test src/tests/autoCaptchaDownload.spec.js --project=chromium
+          PYTHONUNBUFFERED: '1'
+          FORCE_COLOR: '1'
+        run: pnpm exec playwright test src/tests/autoCaptchaDownload.spec.js --project=chromium --reporter=list
 
       - name: Upload downloaded PDFs
         if: ${{ !cancelled() }}
