@@ -4,32 +4,136 @@ import time
 import subprocess
 import http.client
 import json
-from urllib.parse import urlparse
+import zipfile
+from pathlib import Path
 
-RELEASE_ID = 385304345
-REPO = "ankit0984/ecinet-automation"
-ASSET_NAME = "best_hf_captcha_model.zip"
-FILE_PATH = os.path.abspath("captcha_reader_model/model_training/checkpoints/best_hf_captcha_model.zip")
+# Paths
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent.parent
+DEFAULT_MODEL_DIR = PROJECT_ROOT / "captcha_reader_model" / "model_training" / "checkpoints" / "best_hf_captcha_model"
+DEFAULT_ZIP_PATH = PROJECT_ROOT / "captcha_reader_model" / "model_training" / "checkpoints" / "best_hf_captcha_model.zip"
+
+# Configuration (can be overridden via env vars)
+REPO = os.environ.get("REPO", "ankit0984/automation-workflow")
+TAG_NAME = os.environ.get("TAG_NAME", "v1.0.0")
+RELEASE_ID = os.environ.get("RELEASE_ID")  # Optional: auto-detected from TAG_NAME if not provided
+ASSET_NAME = os.environ.get("ASSET_NAME", "best_hf_captcha_model.zip")
+FILE_PATH = os.environ.get("FILE_PATH", str(DEFAULT_ZIP_PATH))
+
 
 def get_github_token():
-    token = os.environ.get("GITHUB_TOKEN")
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
     if token:
         return token
-    cmd = "printf 'protocol=https\\nhost=github.com\\n\\n' | git credential fill"
-    proc = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    for line in proc.stdout.splitlines():
-        if line.startswith("password="):
-            return line.split("=", 1)[1].strip()
+
+    # Try GitHub CLI (gh auth token)
+    try:
+        proc = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=5)
+        if proc.returncode == 0 and proc.stdout.strip():
+            return proc.stdout.strip()
+    except Exception:
+        pass
+
+    # Try git credential helper with terminal prompt disabled to avoid hanging
+    try:
+        cmd = "printf 'protocol=https\\nhost=github.com\\n\\n' | git credential fill"
+        env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+        proc = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5, env=env)
+        for line in proc.stdout.splitlines():
+            if line.startswith("password="):
+                return line.split("=", 1)[1].strip()
+    except Exception:
+        pass
+
     return None
 
-def check_existing_asset(token):
+
+def ensure_zip_exists():
+    """Create .zip using store mode (no compression) in 2 seconds instead of burning CPU."""
+    if os.path.exists(FILE_PATH):
+        return
+
+    if not DEFAULT_MODEL_DIR.exists():
+        print(f"Error: Model directory not found: {DEFAULT_MODEL_DIR}")
+        sys.exit(1)
+
+    print(f"Zip not found at {FILE_PATH}.")
+    print(f"Packing {DEFAULT_MODEL_DIR} into {FILE_PATH} (fast store mode, no re-compression)...")
+    start = time.time()
+    with zipfile.ZipFile(FILE_PATH, "w", compression=zipfile.ZIP_STORED) as zf:
+        for file in DEFAULT_MODEL_DIR.iterdir():
+            if file.is_file() and not file.name.startswith("."):
+                print(f"  -> Adding {file.name} ({file.stat().st_size / (1024 * 1024):.1f} MB)...")
+                zf.write(file, arcname=file.name)
+    elapsed = time.time() - start
+    print(f"✓ Archive created in {elapsed:.1f}s at: {FILE_PATH}")
+
+
+def get_or_create_release(token):
+    global RELEASE_ID
+    if RELEASE_ID:
+        return int(RELEASE_ID)
+
+    headers = {
+        "Authorization": f"token {token}",
+        "User-Agent": "UploadScript",
+        "Accept": "application/vnd.github.v3+json"
+    }
+
+    conn = http.client.HTTPSConnection("api.github.com")
+
+    # 1. Try finding release by TAG_NAME
+    conn.request("GET", f"/repos/{REPO}/releases/tags/{TAG_NAME}", headers=headers)
+    res = conn.getresponse()
+    if res.status == 200:
+        data = json.loads(res.read().decode())
+        RELEASE_ID = data["id"]
+        print(f"Found existing release for tag '{TAG_NAME}' (ID: {RELEASE_ID})")
+        conn.close()
+        return RELEASE_ID
+
+    # 2. If tag not found, check latest release
+    conn.request("GET", f"/repos/{REPO}/releases/latest", headers=headers)
+    res = conn.getresponse()
+    if res.status == 200:
+        data = json.loads(res.read().decode())
+        RELEASE_ID = data["id"]
+        print(f"Found latest release '{data.get('tag_name')}' (ID: {RELEASE_ID})")
+        conn.close()
+        return RELEASE_ID
+
+    # 3. Create release if not found
+    print(f"No release found for tag '{TAG_NAME}'. Creating release...")
+    payload = json.dumps({
+        "tag_name": TAG_NAME,
+        "name": f"Release {TAG_NAME}",
+        "body": "Captcha model weights checkpoint",
+        "draft": False,
+        "prerelease": False
+    })
+    conn.request("POST", f"/repos/{REPO}/releases", body=payload, headers=headers)
+    res = conn.getresponse()
+    body = res.read().decode()
+    if res.status in (200, 201):
+        data = json.loads(body)
+        RELEASE_ID = data["id"]
+        print(f"✓ Created release '{TAG_NAME}' (ID: {RELEASE_ID})")
+        conn.close()
+        return RELEASE_ID
+    else:
+        print(f"Error creating release: HTTP {res.status}: {body}")
+        conn.close()
+        sys.exit(1)
+
+
+def check_existing_asset(token, release_id):
     conn = http.client.HTTPSConnection("api.github.com")
     headers = {
         "Authorization": f"token {token}",
         "User-Agent": "UploadScript",
         "Accept": "application/vnd.github.v3+json"
     }
-    conn.request("GET", f"/repos/{REPO}/releases/{RELEASE_ID}/assets", headers=headers)
+    conn.request("GET", f"/repos/{REPO}/releases/{release_id}/assets", headers=headers)
     res = conn.getresponse()
     if res.status == 200:
         assets = json.loads(res.read().decode())
@@ -45,26 +149,31 @@ def check_existing_asset(token):
                 break
     conn.close()
 
+
 def upload():
     token = get_github_token()
     if not token:
-        print("Error: Could not obtain GitHub token from git credentials or environment.")
+        print("Error: Could not obtain GitHub token from GITHUB_TOKEN, GH_TOKEN, gh CLI, or git credential.")
+        print("Please export your token: export GITHUB_TOKEN='ghp_...'")
         sys.exit(1)
 
-    if not os.path.exists(FILE_PATH):
-        print(f"Error: File not found: {FILE_PATH}")
-        sys.exit(1)
+    # Ensure zip is built
+    ensure_zip_exists()
+
+    release_id = get_or_create_release(token)
 
     file_size = os.path.getsize(FILE_PATH)
     file_size_mb = file_size / (1024 * 1024)
-    print(f"File: {FILE_PATH}")
-    print(f"Size: {file_size_mb:.2f} MB ({file_size} bytes)")
+    print(f"Target Repo: {REPO}")
+    print(f"Release ID:  {release_id}")
+    print(f"File:        {FILE_PATH}")
+    print(f"Size:        {file_size_mb:.2f} MB ({file_size} bytes)")
 
-    check_existing_asset(token)
+    check_existing_asset(token, release_id)
 
     print(f"Connecting to uploads.github.com...")
     conn = http.client.HTTPSConnection("uploads.github.com", timeout=600)
-    path = f"/repos/{REPO}/releases/{RELEASE_ID}/assets?name={ASSET_NAME}"
+    path = f"/repos/{REPO}/releases/{release_id}/assets?name={ASSET_NAME}"
     
     headers = {
         "Authorization": f"token {token}",
@@ -114,5 +223,7 @@ def upload():
         print(f"Failed: {body}")
         sys.exit(1)
 
+
 if __name__ == "__main__":
     upload()
+
