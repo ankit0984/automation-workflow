@@ -1,0 +1,30 @@
+{
+  "name": "ecinet_automation",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "automation": "playwright test src/tests/autoCaptchaDownload.spec.js --headed --project=chromium",
+    "report": "pnpm exec playwright show-report",
+    "form9check": "node src/form9Check.js",
+    "form10check": "node src/form10Check.js",
+    "data:analyze": "node src/deleteDateFiles.js --analyze",
+    "data:delete": "node src/deleteDateFiles.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "11.24.0",
+      "onFail": "download"
+    }
+  },
+  "packageManager": "pnpm@11.24.0",
+  "type": "module",
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "@types/node": "^26.4.1"
+  }
+}

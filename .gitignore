@@ -8,7 +8,6 @@ node_modules/
 /playwright/.auth/
 
 kpi/
-scripts/
 
 # OS files
 .DS_Store
@@ -20,24 +19,40 @@ scripts/
 *.pt
 *.pth
 *.onnx
+*.zip
+*.tar.gz
 checkpoints/
 .vscode/
 tests/.DS_Store
 /script.sh
 .kilo/
+
+# Data outputs & scraped files
 data/captcha_labels.json
 data/captcha_data.json
-data/captcha_images
-data/temp_captcha
-captcha_reader_model/
-data/
-tests
-package.json
-pnpm-lock.yaml
-playwright.config.js
-deleteDateFiles.js
-form10Check.js
-form9Check.js
-fileCheck.js
-formatedDate.js
-pnpm-workspace.yaml
+data/captcha_images/
+data/temp_captcha/
+data/Form_10_29_sep/
+data/form10_data/
+data/**/*.pdf
+
+# Captcha model: only scripts and source code are committed
+captcha_reader_model/*
+!captcha_reader_model/model_training/
+!captcha_reader_model/data_processing/
+captcha_reader_model/model_training/*
+!captcha_reader_model/model_training/predict_hf.py
+
+# Data processing outputs & secrets
+captcha_reader_model/data_processing/output/
+captcha_reader_model/data_processing/processed_files.json
+service_account.json
+*service_account*.json
+
+# Backups
+*.bak
+*.bak.*
+
+# pnpm store
+.pnpm-store/
+
