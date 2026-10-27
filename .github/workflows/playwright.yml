@@ -4,6 +4,15 @@ on:
     # 16:00 IST = 10:30 UTC (GitHub may start scheduled runs a few minutes late)
     - cron: '30 10 * * *'
   workflow_dispatch:
+    inputs:
+      runner:
+        description: 'Runner environment (use self-hosted if in India)'
+        required: true
+        default: 'ubuntu-latest'
+        type: choice
+        options:
+          - ubuntu-latest
+          - self-hosted
 
 permissions:
   contents: read
@@ -15,7 +24,7 @@ concurrency:
 jobs:
   download:
     timeout-minutes: 240
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -61,6 +70,10 @@ jobs:
 
       - name: Download statutory reports
         # Dates come from USE_YESTERDAY / START_DATE / END_DATE in the test file
+        env:
+          PROXY_SERVER: ${{ secrets.PROXY_SERVER }}
+          PROXY_USERNAME: ${{ secrets.PROXY_USERNAME }}
+          PROXY_PASSWORD: ${{ secrets.PROXY_PASSWORD }}
         run: pnpm exec playwright test src/tests/autoCaptchaDownload.spec.js --project=chromium
 
       - name: Upload downloaded PDFs

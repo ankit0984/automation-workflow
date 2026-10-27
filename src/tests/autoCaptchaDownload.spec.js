@@ -386,22 +386,32 @@ test('Form Automation & Statutory Report Downloader with AI Captcha Solver', asy
   }
 
   try {
-    await page.goto(TARGET_PAGE_URL, { waitUntil: 'commit', timeout: 60000 }).catch(err => {
+    console.log(`🌐 Navigating to: ${TARGET_PAGE_URL}`);
+    const navResponse = await page.goto(TARGET_PAGE_URL, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(err => {
       console.log(`⚠️ Navigation notice: ${err.message}`);
+      return null;
     });
+
+    const httpStatus = navResponse ? navResponse.status() : 'No response';
+    const pageTitle = await page.title().catch(() => 'Untitled');
+    console.log(`📡 Portal HTTP Status: ${httpStatus} | Page Title: "${pageTitle}"`);
 
     // 1. Wait for District dropdown to populate
     const districtSelect = page.getByLabel('District');
-    await page.waitForFunction(
-      () => {
-        const labels = Array.from(document.querySelectorAll('label'));
-        const dLabel = labels.find(l => l.innerText?.includes('District'));
-        const select = dLabel ? document.getElementById(dLabel.htmlFor) || dLabel.querySelector('select') : null;
-        return select && select.options.length > 1;
-      },
-      null,
-      { timeout: 30000 }
-    ).catch(() => {});
+    try {
+      await page.waitForFunction(
+        () => {
+          const labels = Array.from(document.querySelectorAll('label'));
+          const dLabel = labels.find(l => l.innerText?.includes('District'));
+          const select = dLabel ? document.getElementById(dLabel.htmlFor) || dLabel.querySelector('select') : null;
+          return select && select.options.length > 1;
+        },
+        null,
+        { timeout: 30000 }
+      );
+    } catch (err) {
+      console.warn(`⚠️ Timeout waiting for District dropdown to populate: ${err.message}`);
+    }
 
     // Extract all District options
     const districtElements = await districtSelect.locator('option').all();
@@ -423,6 +433,15 @@ test('Form Automation & Statutory Report Downloader with AI Captcha Solver', asy
       } else {
         districtList = districtList.filter(d => d.value === TARGET_DISTRICT || d.label === TARGET_DISTRICT);
       }
+    }
+
+    if (districtList.length === 0) {
+      const bodySnippet = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 300);
+      console.error(`❌ Portal body content: "${bodySnippet}"`);
+      if (httpStatus === 403 || bodySnippet.toLowerCase().includes('access denied') || bodySnippet.toLowerCase().includes('forbidden')) {
+        throw new Error(`❌ ECI Portal blocked access (HTTP ${httpStatus}). The portal is geo-restricted to Indian IPs. In GitHub Actions, use a self-hosted runner in India or an Indian proxy.`);
+      }
+      throw new Error(`❌ No districts found. Portal failed to populate dropdown (HTTP ${httpStatus}, Title: "${pageTitle}").`);
     }
 
     console.log(`🏛️ Found ${districtList.length} District(s) to process.`);
