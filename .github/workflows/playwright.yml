@@ -37,24 +37,30 @@ jobs:
         run: |
           python -m venv captcha_reader_model/.venv
           captcha_reader_model/.venv/bin/pip install --quiet torch==2.14.0 torchvision==0.29.0 --index-url https://download.pytorch.org/whl/cpu
-          captcha_reader_model/.venv/bin/pip install --quiet transformers==5.16.1 pillow==12.3.0 pypdfium2 pandas openpyxl
+          captcha_reader_model/.venv/bin/pip install --quiet transformers==5.16.1 pillow==12.3.0 pypdfium2 pandas openpyxl gspread
 
-      # No local checkpoint in CI, so predict_hf.py loads ankit0982/captcha from Hugging Face
-      - name: Cache Hugging Face model
+      # Cache downloaded model archive between workflow runs
+      - name: Cache captcha model archive
+        id: cache-model
         uses: actions/cache@v4
         with:
-          path: ~/.cache/huggingface/hub
-          key: hf-model-ankit0982-captcha-v1
-      - name: Download captcha model from Hugging Face
-        # Done before the test so the worker's 60s startup timeout isn't spent downloading
+          path: /tmp/best_hf_captcha_model.zip
+          key: captcha-model-v1.0.0
+
+      - name: Download captcha model from GitHub Release
+        if: steps.cache-model.outputs.cache-hit != 'true'
         env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: captcha_reader_model/.venv/bin/python -c "from huggingface_hub import snapshot_download; print(snapshot_download('ankit0982/captcha'))"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download v1.0.0 --repo ${{ github.repository }} --pattern "best_hf_captcha_model.zip" --dir /tmp
+
+      - name: Extract captcha model
+        run: |
+          mkdir -p captcha_reader_model/model_training/checkpoints/best_hf_captcha_model
+          unzip -q -o /tmp/best_hf_captcha_model.zip -d captcha_reader_model/model_training/checkpoints/best_hf_captcha_model
 
       - name: Download statutory reports
         # Dates come from USE_YESTERDAY / START_DATE / END_DATE in the test file
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: pnpm exec playwright test src/tests/autoCaptchaDownload.spec.js --project=chromium
 
       - name: Upload downloaded PDFs
