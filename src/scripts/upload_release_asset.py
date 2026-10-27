@@ -69,85 +69,83 @@ def ensure_zip_exists():
     print(f"✓ Archive created in {elapsed:.1f}s at: {FILE_PATH}")
 
 
+import urllib.request
+import urllib.error
+
+
+def github_api(method: str, path: str, token: str, data: dict = None):
+    url = f"https://api.github.com{path}"
+    headers = {
+        "Authorization": f"token {token}",
+        "User-Agent": "UploadScript",
+        "Accept": "application/vnd.github.v3+json",
+    }
+    body = json.dumps(data).encode("utf-8") if data is not None else None
+    if body:
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=body, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req) as response:
+            res_body = response.read().decode("utf-8")
+            return response.status, json.loads(res_body) if res_body else {}
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode("utf-8")
+        try:
+            parsed = json.loads(err_body)
+        except Exception:
+            parsed = {"message": err_body}
+        return e.code, parsed
+
+
 def get_or_create_release(token):
     global RELEASE_ID
     if RELEASE_ID:
         return int(RELEASE_ID)
 
-    headers = {
-        "Authorization": f"token {token}",
-        "User-Agent": "UploadScript",
-        "Accept": "application/vnd.github.v3+json"
-    }
-
-    conn = http.client.HTTPSConnection("api.github.com")
-
     # 1. Try finding release by TAG_NAME
-    conn.request("GET", f"/repos/{REPO}/releases/tags/{TAG_NAME}", headers=headers)
-    res = conn.getresponse()
-    if res.status == 200:
-        data = json.loads(res.read().decode())
+    status, data = github_api("GET", f"/repos/{REPO}/releases/tags/{TAG_NAME}", token)
+    if status == 200:
         RELEASE_ID = data["id"]
         print(f"Found existing release for tag '{TAG_NAME}' (ID: {RELEASE_ID})")
-        conn.close()
         return RELEASE_ID
 
     # 2. If tag not found, check latest release
-    conn.request("GET", f"/repos/{REPO}/releases/latest", headers=headers)
-    res = conn.getresponse()
-    if res.status == 200:
-        data = json.loads(res.read().decode())
+    status, data = github_api("GET", f"/repos/{REPO}/releases/latest", token)
+    if status == 200:
         RELEASE_ID = data["id"]
         print(f"Found latest release '{data.get('tag_name')}' (ID: {RELEASE_ID})")
-        conn.close()
         return RELEASE_ID
 
     # 3. Create release if not found
     print(f"No release found for tag '{TAG_NAME}'. Creating release...")
-    payload = json.dumps({
+    payload = {
         "tag_name": TAG_NAME,
         "name": f"Release {TAG_NAME}",
         "body": "Captcha model weights checkpoint",
         "draft": False,
         "prerelease": False
-    })
-    conn.request("POST", f"/repos/{REPO}/releases", body=payload, headers=headers)
-    res = conn.getresponse()
-    body = res.read().decode()
-    if res.status in (200, 201):
-        data = json.loads(body)
+    }
+    status, data = github_api("POST", f"/repos/{REPO}/releases", token, data=payload)
+    if status in (200, 201):
         RELEASE_ID = data["id"]
         print(f"✓ Created release '{TAG_NAME}' (ID: {RELEASE_ID})")
-        conn.close()
         return RELEASE_ID
     else:
-        print(f"Error creating release: HTTP {res.status}: {body}")
-        conn.close()
+        print(f"Error creating release: HTTP {status}: {data}")
         sys.exit(1)
 
 
 def check_existing_asset(token, release_id):
-    conn = http.client.HTTPSConnection("api.github.com")
-    headers = {
-        "Authorization": f"token {token}",
-        "User-Agent": "UploadScript",
-        "Accept": "application/vnd.github.v3+json"
-    }
-    conn.request("GET", f"/repos/{REPO}/releases/{release_id}/assets", headers=headers)
-    res = conn.getresponse()
-    if res.status == 200:
-        assets = json.loads(res.read().decode())
+    status, assets = github_api("GET", f"/repos/{REPO}/releases/{release_id}/assets", token)
+    if status == 200 and isinstance(assets, list):
         for asset in assets:
             if asset.get("name") == ASSET_NAME:
                 asset_id = asset.get("id")
                 print(f"Asset already exists (ID: {asset_id}), deleting old asset before re-upload...")
-                del_conn = http.client.HTTPSConnection("api.github.com")
-                del_conn.request("DELETE", f"/repos/{REPO}/releases/assets/{asset_id}", headers=headers)
-                del_res = del_conn.getresponse()
-                print(f"Delete status: {del_res.status}")
+                del_status, _ = github_api("DELETE", f"/repos/{REPO}/releases/assets/{asset_id}", token)
+                print(f"Delete status: {del_status}")
                 time.sleep(1)
                 break
-    conn.close()
 
 
 def upload():
