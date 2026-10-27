@@ -41,38 +41,58 @@ jobs:
       - name: Configure Tailscale Exit Node (Mac with Android Failover)
         if: ${{ env.TAILSCALE_AUTHKEY != '' }}
         run: |
-          SELECTED_NODE=""
+          echo "=== Tailscale Network Status ==="
+          tailscale status || true
 
-          # 1. Check if Mac exit node is online
-          if [ -n "$MAC_NODE" ]; then
-            echo "Checking availability of Mac node: $MAC_NODE..."
-            if tailscale ping -c 1 --timeout 3s "$MAC_NODE" > /dev/null 2>&1; then
-              echo "✓ Mac is ONLINE! Selecting Mac as exit node."
-              SELECTED_NODE="$MAC_NODE"
+          echo "=== Available Exit Nodes ==="
+          tailscale exit-node list || true
+
+          # Strip any accidental whitespace/newlines
+          MAC=$(echo "${MAC_NODE:-100.108.30.75}" | tr -d '[:space:]')
+          ANDROID=$(echo "${ANDROID_NODE:-100.125.5.44}" | tr -d '[:space:]')
+
+          route_success=false
+
+          # 1. Try Mac Exit Node
+          if [ -n "$MAC" ]; then
+            echo "Attempting to route through Mac exit node: $MAC..."
+            sudo tailscale set --exit-node="$MAC" --exit-node-allow-lan-access=true || true
+            sleep 2
+            COUNTRY=$(curl -s --max-time 5 https://ipinfo.io/country | tr -d '[:space:]' || true)
+            echo "Egress Country via Mac: '$COUNTRY'"
+            if [ "$COUNTRY" = "IN" ]; then
+              echo "✓ Successfully routed through Mac Indian exit node!"
+              route_success=true
             else
-              echo "⚠️ Mac ($MAC_NODE) is offline or unreachable."
+              echo "⚠️ Mac is not routing traffic to India (got '$COUNTRY')."
             fi
           fi
 
-          # 2. If Mac is offline, failover to Android
-          if [ -z "$SELECTED_NODE" ] && [ -n "$ANDROID_NODE" ]; then
-            echo "Checking availability of Android node: $ANDROID_NODE..."
-            if tailscale ping -c 1 --timeout 3s "$ANDROID_NODE" > /dev/null 2>&1; then
-              echo "✓ Android phone is ONLINE! Failing over to Android exit node."
-              SELECTED_NODE="$ANDROID_NODE"
+          # 2. Try Android Exit Node if Mac failed
+          if [ "$route_success" = false ] && [ -n "$ANDROID" ]; then
+            echo "Failing over: Attempting to route through Android exit node: $ANDROID..."
+            sudo tailscale set --exit-node="$ANDROID" --exit-node-allow-lan-access=true || true
+            sleep 2
+            COUNTRY=$(curl -s --max-time 5 https://ipinfo.io/country | tr -d '[:space:]' || true)
+            echo "Egress Country via Android: '$COUNTRY'"
+            if [ "$COUNTRY" = "IN" ]; then
+              echo "✓ Successfully routed through Android Indian exit node!"
+              route_success=true
             else
-              echo "⚠️ Android phone ($ANDROID_NODE) is also unreachable."
+              echo "⚠️ Android is not routing traffic to India (got '$COUNTRY')."
             fi
           fi
 
-          # 3. Apply exit node if selected
-          if [ -n "$SELECTED_NODE" ]; then
-            echo "Activating exit node: $SELECTED_NODE"
-            sudo tailscale set --exit-node="$SELECTED_NODE" --exit-node-allow-lan-access=true
-            echo "Verifying public IP after exit node activation:"
-            curl -s --max-time 5 https://ipinfo.io/json || true
-          else
-            echo "⚠️ Neither Mac nor Android node was reachable. Continuing with default connection."
+          echo "=== Final Public IP Verification ==="
+          curl -s --max-time 5 https://ipinfo.io/json || true
+
+          if [ "$route_success" = false ]; then
+            echo "❌ ERROR: Neither Mac ($MAC) nor Android ($ANDROID) successfully routed internet through India."
+            echo "IMPORTANT: In Tailscale Admin Console (https://login.tailscale.com/admin/machines):"
+            echo "1. Find your Mac and Android devices."
+            echo "2. Click '...' -> 'Edit route settings...'."
+            echo "3. Turn ON 'Use as exit node' for both devices."
+            exit 1
           fi
 
       - uses: pnpm/action-setup@v4
