@@ -25,23 +25,21 @@ jobs:
   download:
     timeout-minutes: 240
     runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
+    env:
+      TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
+      MAC_NODE: ${{ secrets.TS_MAC_NODE }}
+      ANDROID_NODE: ${{ secrets.TS_ANDROID_NODE }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Connect to Tailscale
         if: ${{ env.TAILSCALE_AUTHKEY != '' }}
         uses: tailscale/github-action@v3
-        env:
-          TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
 
       - name: Configure Tailscale Exit Node (Mac with Android Failover)
         if: ${{ env.TAILSCALE_AUTHKEY != '' }}
-        env:
-          TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
-          MAC_NODE: ${{ secrets.TS_MAC_NODE }}
-          ANDROID_NODE: ${{ secrets.TS_ANDROID_NODE }}
         run: |
           SELECTED_NODE=""
 
