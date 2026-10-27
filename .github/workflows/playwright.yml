@@ -32,6 +32,61 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Playwright Browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # Cache the entire Python virtualenv so PyTorch and Transformers restore in ~3s
+      - name: Cache Python virtualenv
+        id: cache-venv
+        uses: actions/cache@v4
+        with:
+          path: captcha_reader_model/.venv
+          key: venv-py313-torch-v2
+
+      - name: Install captcha model dependencies (CPU)
+        if: steps.cache-venv.outputs.cache-hit != 'true'
+        run: |
+          uv venv captcha_reader_model/.venv --python 3.13
+          uv pip install --python captcha_reader_model/.venv/bin/python \
+            --index https://download.pytorch.org/whl/cpu \
+            torch torchvision transformers pillow pypdfium2 pandas openpyxl gspread
+
+      # Cache downloaded model archive between workflow runs
+      - name: Cache captcha model archive
+        id: cache-model
+        uses: actions/cache@v4
+        with:
+          path: /tmp/best_hf_captcha_model.zip
+          key: captcha-model-v1.0.0
+
+      - name: Download captcha model from GitHub Release
+        if: steps.cache-model.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download v1.0.0 --repo ${{ github.repository }} --pattern "best_hf_captcha_model.zip" --dir /tmp
+
+      - name: Extract captcha model
+        run: |
+          mkdir -p captcha_reader_model/model_training/checkpoints/best_hf_captcha_model
+          unzip -q -o /tmp/best_hf_captcha_model.zip -d captcha_reader_model/model_training/checkpoints/best_hf_captcha_model
+
+      # Connect to Tailscale only right before running tests so all 2.5GB dependencies download fast on GitHub CDN
       - name: Connect to Tailscale
         if: ${{ env.TAILSCALE_AUTHKEY != '' }}
         uses: tailscale/github-action@v3
@@ -94,46 +149,6 @@ jobs:
             echo "3. Turn ON 'Use as exit node' for both devices."
             exit 1
           fi
-
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: lts/*
-          cache: pnpm
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Install Playwright Browsers
-        run: pnpm exec playwright install --with-deps chromium
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-      - name: Install captcha model dependencies (CPU)
-        # The test auto-detects captcha_reader_model/.venv
-        run: |
-          python -m venv captcha_reader_model/.venv
-          captcha_reader_model/.venv/bin/pip install --quiet torch==2.14.0 torchvision==0.29.0 --index-url https://download.pytorch.org/whl/cpu
-          captcha_reader_model/.venv/bin/pip install --quiet transformers==5.16.1 pillow==12.3.0 pypdfium2 pandas openpyxl gspread
-
-      # Cache downloaded model archive between workflow runs
-      - name: Cache captcha model archive
-        id: cache-model
-        uses: actions/cache@v4
-        with:
-          path: /tmp/best_hf_captcha_model.zip
-          key: captcha-model-v1.0.0
-
-      - name: Download captcha model from GitHub Release
-        if: steps.cache-model.outputs.cache-hit != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release download v1.0.0 --repo ${{ github.repository }} --pattern "best_hf_captcha_model.zip" --dir /tmp
-
-      - name: Extract captcha model
-        run: |
-          mkdir -p captcha_reader_model/model_training/checkpoints/best_hf_captcha_model
-          unzip -q -o /tmp/best_hf_captcha_model.zip -d captcha_reader_model/model_training/checkpoints/best_hf_captcha_model
 
       - name: Download statutory reports
         # Dates come from USE_YESTERDAY / START_DATE / END_DATE in the test file
