@@ -28,6 +28,55 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Connect to Tailscale
+        if: ${{ env.TAILSCALE_AUTHKEY != '' }}
+        uses: tailscale/github-action@v3
+        env:
+          TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+
+      - name: Configure Tailscale Exit Node (Mac with Android Failover)
+        if: ${{ env.TAILSCALE_AUTHKEY != '' }}
+        env:
+          TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
+          MAC_NODE: ${{ secrets.TS_MAC_NODE }}
+          ANDROID_NODE: ${{ secrets.TS_ANDROID_NODE }}
+        run: |
+          SELECTED_NODE=""
+
+          # 1. Check if Mac exit node is online
+          if [ -n "$MAC_NODE" ]; then
+            echo "Checking availability of Mac node: $MAC_NODE..."
+            if tailscale ping -c 1 --timeout 3s "$MAC_NODE" > /dev/null 2>&1; then
+              echo "✓ Mac is ONLINE! Selecting Mac as exit node."
+              SELECTED_NODE="$MAC_NODE"
+            else
+              echo "⚠️ Mac ($MAC_NODE) is offline or unreachable."
+            fi
+          fi
+
+          # 2. If Mac is offline, failover to Android
+          if [ -z "$SELECTED_NODE" ] && [ -n "$ANDROID_NODE" ]; then
+            echo "Checking availability of Android node: $ANDROID_NODE..."
+            if tailscale ping -c 1 --timeout 3s "$ANDROID_NODE" > /dev/null 2>&1; then
+              echo "✓ Android phone is ONLINE! Failing over to Android exit node."
+              SELECTED_NODE="$ANDROID_NODE"
+            else
+              echo "⚠️ Android phone ($ANDROID_NODE) is also unreachable."
+            fi
+          fi
+
+          # 3. Apply exit node if selected
+          if [ -n "$SELECTED_NODE" ]; then
+            echo "Activating exit node: $SELECTED_NODE"
+            sudo tailscale set --exit-node="$SELECTED_NODE" --exit-node-allow-lan-access=true
+            echo "Verifying public IP after exit node activation:"
+            curl -s --max-time 5 https://ipinfo.io/json || true
+          else
+            echo "⚠️ Neither Mac nor Android node was reachable. Continuing with default connection."
+          fi
+
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
