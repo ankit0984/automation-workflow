@@ -5,7 +5,11 @@
 export async function sendTelegram(message) {
   const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
   const chatId = process.env.TELEGRAM_CHAT_ID?.trim();
-  if (!token || !chatId) return false;
+
+  if (!token || !chatId) {
+    console.log(`[Telegram] Skipping notification: TELEGRAM_BOT_TOKEN is ${token ? 'SET' : 'MISSING'}, TELEGRAM_CHAT_ID is ${chatId ? 'SET' : 'MISSING'}`);
+    return false;
+  }
 
   try {
     const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
@@ -18,9 +22,17 @@ export async function sendTelegram(message) {
         disable_web_page_preview: true
       })
     });
-    return response.ok;
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.warn(`[Telegram] API error (HTTP ${response.status}): ${errText}`);
+      return false;
+    }
+
+    console.log(`[Telegram] Notification delivered successfully.`);
+    return true;
   } catch (err) {
-    // Fail safely without affecting downloads
+    console.warn(`[Telegram] Network warning: ${err.message}`);
     return false;
   }
 }
