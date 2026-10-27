@@ -4,6 +4,7 @@ import path from 'path';
 import { spawn, execFile, spawnSync } from 'child_process';
 import { promisify } from 'util';
 import { formattedYesterday } from '../formatedDate.js';
+import { sendTelegram } from '../utils/telegram.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -445,6 +446,7 @@ test('Form Automation & Statutory Report Downloader with AI Captcha Solver', asy
     }
 
     console.log(`🏛️ Found ${districtList.length} District(s) to process.`);
+    await sendTelegram(`🚀 <b>Statutory Downloader Started</b>\n🏛️ <b>Districts:</b> ${districtList.length}\n📄 <b>Form:</b> ${FORM_TYPE.toUpperCase()}`);
 
     const processedDates = new Set();
 
@@ -677,6 +679,7 @@ test('Form Automation & Statutory Report Downloader with AI Captcha Solver', asy
               syncKpiHtml(allRecords);
 
               console.log(`  🏷️ Saved verified image: ${permanentFilename} ➔ Label: "${predictedText}" [Total: ${allRecords.length}]`);
+              await sendTelegram(`✅ <b>[${district.label}]</b> ${ac.label}\n📄 <code>${filename}</code>\n🤖 CAPTCHA: <code>${predictedText}</code>\n📊 Total: <b>${allRecords.length}</b>`);
 
               break; // Success! Exit retry loop
             } catch (downloadErr) {
@@ -702,9 +705,11 @@ test('Form Automation & Statutory Report Downloader with AI Captcha Solver', asy
       }
 
       console.log(`\n🎉 Finished District: ${district.label}`);
+      await sendTelegram(`🎉 <b>Finished District [${dIdx + 1}/${districtList.length}]:</b> ${district.label}`);
     }
 
     console.log('\n🏁 Finished processing all Districts, Assembly Constituencies, and Dates!');
+    await sendTelegram(`🏁 <b>All Statutory Reports Downloaded!</b>\n📊 Total Verified PDFs: <b>${allRecords.length}</b>`);
 
     // Post-download validation and data extraction
     if (FORM_TYPE === 'form10') {
