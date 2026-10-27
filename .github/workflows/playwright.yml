@@ -167,6 +167,7 @@ jobs:
           PROXY_PASSWORD: ${{ secrets.PROXY_PASSWORD }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
           PYTHONUNBUFFERED: '1'
           FORCE_COLOR: '1'
         run: pnpm exec playwright test src/tests/autoCaptchaDownload.spec.js --project=chromium --reporter=list

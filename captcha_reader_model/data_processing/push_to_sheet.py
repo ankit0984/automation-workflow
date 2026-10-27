@@ -38,7 +38,7 @@ elif (SCRIPT_DIR / "data_processing" / "output" / "form_10.xlsx").exists():
 else:
     DEFAULT_EXCEL_PATH = SCRIPT_DIR / "output" / "form_10.xlsx"
 
-# Automatically find service_account.json
+# Automatically find service_account.json or load from env
 SERVICE_ACCOUNT_FILE = None
 for candidate in [
     SCRIPT_DIR / "service_account.json",
@@ -47,6 +47,16 @@ for candidate in [
     if candidate.exists():
         SERVICE_ACCOUNT_FILE = candidate
         break
+
+if not SERVICE_ACCOUNT_FILE or not SERVICE_ACCOUNT_FILE.exists():
+    sa_env = os.environ.get("GCP_SERVICE_ACCOUNT") or os.environ.get("SERVICE_ACCOUNT_JSON")
+    if sa_env and sa_env.strip():
+        target = SCRIPT_DIR / "service_account.json"
+        try:
+            target.write_text(sa_env.strip(), encoding="utf-8")
+            SERVICE_ACCOUNT_FILE = target
+        except Exception:
+            pass
 
 if not SERVICE_ACCOUNT_FILE:
     SERVICE_ACCOUNT_FILE = SCRIPT_DIR / "service_account.json"
@@ -643,9 +653,10 @@ def push_to_existing_google_sheet(
     theme: str = "material",
 ):
     """Programmatically push form_10.xlsx and generate full Executive Analytics Suite."""
-    if not service_account_path.exists():
-        print(f"Error: Service account file not found at: {service_account_path.resolve()}", file=sys.stderr)
-        sys.exit(1)
+    if not service_account_path or not service_account_path.exists():
+        print(f"Warning: Service account file not found at: {service_account_path.resolve() if service_account_path else 'None'}", file=sys.stderr)
+        print("Skipping Google Sheets upload. To enable Google Sheets sync, add the GCP_SERVICE_ACCOUNT secret.", file=sys.stderr)
+        return False
 
     if not excel_path.exists():
         print(f"Error: Excel file not found at: {excel_path.resolve()}", file=sys.stderr)
@@ -759,9 +770,9 @@ def format_only_google_sheet(
     theme: str = "material",
 ):
     """Formats existing data in the Google Sheet into an interactive table without re-uploading."""
-    if not service_account_path.exists():
-        print(f"Error: Service account file not found at: {service_account_path.resolve()}", file=sys.stderr)
-        sys.exit(1)
+    if not service_account_path or not service_account_path.exists():
+        print(f"Warning: Service account file not found at: {service_account_path.resolve() if service_account_path else 'None'}", file=sys.stderr)
+        return False
 
     print("Authenticating with Google Sheets API...")
     gc = gspread.service_account(filename=str(service_account_path))
@@ -806,9 +817,9 @@ def summary_only_google_sheet(
     service_account_path: Path = SERVICE_ACCOUNT_FILE,
 ):
     """Builds or refreshes only the '📊 Executive Summary' tab in ~2 seconds."""
-    if not service_account_path.exists():
-        print(f"Error: Service account file not found at: {service_account_path.resolve()}", file=sys.stderr)
-        sys.exit(1)
+    if not service_account_path or not service_account_path.exists():
+        print(f"Warning: Service account file not found at: {service_account_path.resolve() if service_account_path else 'None'}", file=sys.stderr)
+        return False
 
     print(f"Reading Excel: {excel_path.name}...")
     df = pd.read_excel(excel_path, dtype=str).fillna("")
