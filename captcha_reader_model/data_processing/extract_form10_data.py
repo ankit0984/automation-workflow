@@ -220,7 +220,7 @@ def extract_records_from_pdf(pdf_path: Path) -> Tuple[Dict[str, str], List[Dict[
     metadata = parse_metadata(doc, pdf_path)
     records = []
 
-    for page in doc:
+    for p_idx, page in enumerate(doc):
         tp = page.get_textpage()
         count = tp.count_rects()
         if count == 0:
@@ -248,16 +248,25 @@ def extract_records_from_pdf(pdf_path: Path) -> Tuple[Dict[str, str], List[Dict[
             rects.append((l, b, r, t, txt))
 
         if header_y is None:
-            # Fallback table search if header row wasn't single string
-            header_candidates = [r for r in rects if 320 <= r[1] <= 345 and r[4] in ("1", "2", "3")]
-            if header_candidates:
-                header_y = min(r[1] for r in header_candidates)
+            if p_idx == 0:
+                # Page 1: Fallback table search if header row wasn't single string
+                header_candidates = [r for r in rects if 320 <= r[1] <= 345 and r[4] in ("1", "2", "3")]
+                if header_candidates:
+                    header_y = min(r[1] for r in header_candidates)
+            else:
+                # Continuation pages (Page 2+): The ECI portal omits the column numbers header row.
+                # Table rows begin right below the top page header banner (y ~ 525).
+                top_header_rects = [r for r in rects if r[1] > 515 and not r[4].isdigit()]
+                if top_header_rects:
+                    header_y = min(r[1] for r in top_header_rects)
+                else:
+                    header_y = 525.0
 
         if header_y is None:
             continue
 
         # Extract only data rectangles between table header and footer
-        table_rects = [r for r in rects if footer_y <= r[1] < (header_y - 8)]
+        table_rects = [r for r in rects if footer_y <= r[1] < (header_y - 4)]
         if not table_rects:
             continue
 
