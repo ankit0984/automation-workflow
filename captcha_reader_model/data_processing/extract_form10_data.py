@@ -65,8 +65,9 @@ PROJECT_ROOT = SCRIPT_DIR.parent
 DATA_ROOT = PROJECT_ROOT.parent / "data"
 
 DEFAULT_DATA_DIR = DATA_ROOT / "form10_data"
-DEFAULT_OUTPUT_FILE = SCRIPT_DIR / "output" / "form_10.xlsx"
+DEFAULT_OUTPUT_FILE = SCRIPT_DIR / "output" / "form10_data.xlsx"
 DEFAULT_LEDGER_FILE = SCRIPT_DIR / "processed_files.json"
+DEFAULT_SUMMARY_FILE = SCRIPT_DIR / "output" / "last_run_summary.json"
 
 
 def compute_file_hash(filepath: Path) -> str:
@@ -488,6 +489,27 @@ def save_to_excel(output_excel: Path, all_records: List[Dict[str, Any]], separat
     print(f"✓ Saved {len(all_records)} total records to: {output_excel.resolve()}")
 
 
+def write_run_summary(summary_file: Path, **summary):
+    """Write a machine-readable summary of this run (read by src/form10Check.js for Telegram)."""
+    summary_file.parent.mkdir(parents=True, exist_ok=True)
+    summary["finished_at"] = datetime.now().isoformat()
+    with open(summary_file, "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2)
+
+
+def sync_google_sheet(output_excel: Path, header: str) -> str:
+    """Push the master Excel to Google Sheets. Returns 'synced', 'skipped' or 'failed'."""
+    print("\n" + "=" * 60)
+    print(header)
+    print("=" * 60)
+    try:
+        pushed = push_to_existing_google_sheet(excel_path=output_excel)
+        return "skipped" if pushed is False else "synced"
+    except Exception as e:
+        print(f"Warning: Failed to sync to Google Sheets: {e}", file=sys.stderr)
+        return "failed"
+
+
 def process_district_pdfs(
     data_dir: Path = DEFAULT_DATA_DIR,
     output_excel: Path = DEFAULT_OUTPUT_FILE,
@@ -495,6 +517,7 @@ def process_district_pdfs(
     force: bool = False,
     district_tabs: bool = False,
     push_to_sheet: bool = True,
+    summary_file: Path = DEFAULT_SUMMARY_FILE,
 ):
     """Main workflow to scan, parse and export district-wise PDFs to Excel."""
     print("=" * 60)
@@ -563,10 +586,15 @@ def process_district_pdfs(
 
     if not files_to_process and all_records:
         print(f"Master file '{output_excel.name}' is already completely up to date ({len(all_records)} records). Nothing to parse.")
+        write_run_summary(
+            summary_file, pdfs_total=len(all_pdfs), pdfs_parsed=0, new_records=0,
+            new_records_by_date={}, total_records=len(all_records), sheet_status="not_run",
+        )
         return
 
     # Parse PDFs
     new_records_count = 0
+    new_records_by_date = defaultdict(int)
     new_ledger_entries = {}
 
     for idx, (pdf_path, rel_path, file_hash, mtime) in enumerate(files_to_process, 1):
@@ -585,6 +613,7 @@ def process_district_pdfs(
                     existing_keys.add(key)
                     all_records.append(rec)
                     new_records_count += 1
+                    new_records_by_date[rec["GENERATION DATE"]] += 1
 
             new_ledger_entries[rel_path] = {
                 "hash": file_hash,
@@ -606,14 +635,11 @@ def process_district_pdfs(
         ledger["files"] = processed_files
         save_ledger(ledger_file, ledger)
 
-        if push_to_sheet:
-            print("\n" + "=" * 60)
-            print("Syncing Current Database to Google Sheets...")
-            print("=" * 60)
-            try:
-                push_to_existing_google_sheet(excel_path=output_excel)
-            except Exception as e:
-                print(f"Warning: Failed to sync to Google Sheets: {e}", file=sys.stderr)
+        sheet_status = sync_google_sheet(output_excel, "Syncing Current Database to Google Sheets...") if push_to_sheet else "not_run"
+        write_run_summary(
+            summary_file, pdfs_total=len(all_pdfs), pdfs_parsed=len(files_to_process), new_records=0,
+            new_records_by_date={}, total_records=len(all_records), sheet_status=sheet_status,
+        )
         return
 
     # Write to Excel
@@ -625,14 +651,12 @@ def process_district_pdfs(
     save_ledger(ledger_file, ledger)
 
     # Automatically push to Google Sheets
-    if push_to_sheet:
-        print("\n" + "=" * 60)
-        print("Automatically Pushing Updated Data to Google Sheets...")
-        print("=" * 60)
-        try:
-            push_to_existing_google_sheet(excel_path=output_excel)
-        except Exception as e:
-            print(f"Warning: Failed to automatically push to Google Sheets: {e}", file=sys.stderr)
+    sheet_status = sync_google_sheet(output_excel, "Automatically Pushing Updated Data to Google Sheets...") if push_to_sheet else "not_run"
+    write_run_summary(
+        summary_file, pdfs_total=len(all_pdfs), pdfs_parsed=len(files_to_process), new_records=new_records_count,
+        new_records_by_date=dict(sorted(new_records_by_date.items(), key=lambda kv: parse_date_for_sort(kv[0]))),
+        total_records=len(all_records), sheet_status=sheet_status,
+    )
 
 
 def main():

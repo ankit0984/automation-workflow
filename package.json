@@ -8,6 +8,8 @@
     "report": "pnpm exec playwright show-report",
     "form9check": "node src/form9Check.js",
     "form10check": "node src/form10Check.js",
+    "zip_data": "node src/zipDayWise.js",
+    "zip_district": "node src/zipDayWise.js --date",
     "data:analyze": "node src/deleteDateFiles.js --analyze",
     "data:delete": "node src/deleteDateFiles.js"
   },
@@ -26,5 +28,8 @@
   "devDependencies": {
     "@playwright/test": "^1.62.1",
     "@types/node": "^26.4.1"
+  },
+  "dependencies": {
+    "dotenv": "^18.0.9"
   }
 }

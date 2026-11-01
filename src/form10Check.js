@@ -2,11 +2,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
+import { sendTelegram } from "./utils/telegram.js";
+
 import data from "../data/districts_and_constituencies_s19.json" with {
   type: "json",
 };
 
 // Check for target directory (prefer specific form10_data folder if present)
+// const defaultDir = "./data/Form_10_29_sep/Form10_16_22_oct";
 const defaultDir = "./data/form10_data";
 const dirPath = fs.existsSync(defaultDir) ? defaultDir : "./data";
 
@@ -323,6 +326,63 @@ console.log(`📄 Total Found PDFs    : ${totalFound}`);
 console.log(`❌ Total Missing PDFs  : ${missingFiles.length}`);
 console.log(`📈 Completion Rate     : ${overallPct}%`);
 
+/**
+ * Builds a compact HTML version of the check report for Telegram (4096-char message limit).
+ */
+function buildTelegramReport() {
+  const escapeHtml = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const MAX_LIST_ITEMS = 25;
+  const passed = missingFiles.length === 0 && emptyFiles.length === 0;
+
+  const lines = [
+    `📋 <b>FORM 10 PDF FILE CHECK REPORT</b>`,
+    passed ? `✅ <b>All PDFs present</b>` : `❌ <b>Check failed</b>`,
+    ``,
+    `📅 <b>Dates:</b> ${escapeHtml(datesToCheck.join(", "))}`,
+    `📊 Expected: <b>${totalExpected}</b> | Found: <b>${totalFound}</b> | Missing: <b>${missingFiles.length}</b>`,
+    `📈 Completion: <b>${overallPct}%</b>`,
+  ];
+
+  if (datesToCheck.length > 1) {
+    lines.push(``, `<b>By date:</b>`);
+    for (const dateStr of datesToCheck) {
+      const missingOnDate = missingFiles.filter((m) => m.date === dateStr).length;
+      const found = totalConstituencies - missingOnDate;
+      lines.push(`${missingOnDate === 0 ? "✅" : "⚠️"} ${dateStr}: ${found}/${totalConstituencies}`);
+    }
+  }
+
+  if (completelyMissingDistricts.length > 0) {
+    lines.push(``, `❌ <b>Completely missing districts (${completelyMissingDistricts.length}):</b>`);
+    lines.push(escapeHtml(completelyMissingDistricts.join(", ")));
+  }
+
+  if (missingAcMap.size > 0) {
+    lines.push(``, `⚠️ <b>ACs with missing PDFs (${missingAcMap.size}/${totalConstituencies}):</b>`);
+    const acItems = [...missingAcMap.values()];
+    for (const item of acItems.slice(0, MAX_LIST_ITEMS)) {
+      lines.push(`• ${escapeHtml(item.district)} – ${escapeHtml(item.constituency)}: ${item.missingDates.join(", ")}`);
+    }
+    if (acItems.length > MAX_LIST_ITEMS) {
+      lines.push(`…and ${acItems.length - MAX_LIST_ITEMS} more (see console log)`);
+    }
+  }
+
+  if (emptyFiles.length > 0) {
+    lines.push(``, `🗑️ <b>Empty (0-byte) PDFs (${emptyFiles.length}):</b>`);
+    for (const f of emptyFiles.slice(0, MAX_LIST_ITEMS)) {
+      lines.push(`• ${escapeHtml(f.districtDir)}/${escapeHtml(f.name)}`);
+    }
+    if (emptyFiles.length > MAX_LIST_ITEMS) {
+      lines.push(`…and ${emptyFiles.length - MAX_LIST_ITEMS} more`);
+    }
+  }
+
+  return lines.join("\n").slice(0, 4000);
+}
+
+await sendTelegram(buildTelegramReport());
+
 if (missingFiles.length > 0 || emptyFiles.length > 0) {
   if (emptyFiles.length > 0) {
     console.error(`\n❌ ERROR: Found ${emptyFiles.length} empty (0-byte) PDF file(s) that require re-download.`);
@@ -387,6 +447,10 @@ console.log(`🐍 Python binary : ${pythonBin}`);
 console.log(`📄 Script path   : ${extractScript}`);
 console.log(`⏳ Starting extraction pipeline...\n`);
 
+// Written by extract_form10_data.py at the end of each run; remove any stale copy first
+const summaryFile = path.join(path.dirname(extractScript), "output", "last_run_summary.json");
+fs.rmSync(summaryFile, { force: true });
+
 const pythonProcess = spawnSync(pythonBin, [extractScript], {
   stdio: "inherit",
   cwd: path.dirname(extractScript),
@@ -394,13 +458,51 @@ const pythonProcess = spawnSync(pythonBin, [extractScript], {
 
 if (pythonProcess.error) {
   console.error(`\n❌ Failed to execute python script:`, pythonProcess.error);
+  await sendTelegram(`❌ <b>Form 10 extraction failed to start</b>\n${pythonProcess.error.message}`);
   process.exit(1);
 }
 
 if (pythonProcess.status !== 0) {
   console.error(`\n❌ Python extraction script failed with exit code ${pythonProcess.status}`);
+  await sendTelegram(`❌ <b>Form 10 extraction failed</b> (exit code ${pythonProcess.status}). Check the run log.`);
   process.exit(pythonProcess.status || 1);
 }
+
+/**
+ * Builds the Telegram message with new / total rows from last_run_summary.json.
+ */
+function buildExtractionReport() {
+  if (!fs.existsSync(summaryFile)) {
+    return `✅ <b>Form 10 extraction finished</b>\nℹ️ Row summary not available (${path.basename(summaryFile)} missing).`;
+  }
+  const summary = JSON.parse(fs.readFileSync(summaryFile, "utf-8"));
+  const sheetStatus = {
+    synced: "✅ Synced",
+    skipped: "⏩ Skipped (no service account)",
+    failed: "❌ Sync failed",
+    not_run: "⏩ Not pushed this run",
+  }[summary.sheet_status] || summary.sheet_status;
+
+  const lines = [
+    `📊 <b>FORM 10 SHEET UPDATE</b>`,
+    ``,
+    `🆕 New rows added: <b>${summary.new_records.toLocaleString("en-IN")}</b>`,
+    `📚 Total rows in sheet: <b>${summary.total_records.toLocaleString("en-IN")}</b>`,
+    `📄 PDFs parsed this run: <b>${summary.pdfs_parsed}</b> of ${summary.pdfs_total}`,
+    `🔗 Google Sheet: ${sheetStatus}`,
+  ];
+
+  const byDate = Object.entries(summary.new_records_by_date || {});
+  if (byDate.length > 0) {
+    lines.push(``, `<b>New rows by date:</b>`);
+    for (const [date, count] of byDate) {
+      lines.push(`• ${date}: ${count}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+await sendTelegram(buildExtractionReport());
 
 console.log(`\n🎉 Form 10 extraction completed successfully!\n`);
 process.exit(0);
