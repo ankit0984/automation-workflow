@@ -1,14 +1,15 @@
 name: Daily Statutory Report Download
 on:
-  schedule:
-    # 16:00 IST = 10:30 UTC (GitHub may start scheduled runs a few minutes late)
-    - cron: '30 10 * * *'
+  # schedule:
+  # 13:00 IST (Asia/Kolkata) = 07:30 UTC. GitHub cron is always UTC, and scheduled
+  # runs may start a few minutes late.
+  # - cron: '30 7 * * *'
   workflow_dispatch:
     inputs:
       runner:
-        description: 'Runner environment (use self-hosted if in India)'
+        description: "Runner environment (use self-hosted if in India)"
         required: true
-        default: 'ubuntu-latest'
+        default: "ubuntu-latest"
         type: choice
         options:
           - ubuntu-latest
@@ -54,7 +55,7 @@ jobs:
       - uses: actions/setup-python@v5
         id: setup-python
         with:
-          python-version: '3.13'
+          python-version: "3.13"
 
       - uses: astral-sh/setup-uv@v5
         with:
@@ -176,8 +177,8 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID || vars.TELEGRAM_CHAT_ID }}
           GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-          PYTHONUNBUFFERED: '1'
-          FORCE_COLOR: '1'
+          PYTHONUNBUFFERED: "1"
+          FORCE_COLOR: "1"
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         # Same as package.json "auto" script; extra flags are passed through to playwright.
         # telegramLogStream.js runs it and keeps one Telegram message updated with live logs
