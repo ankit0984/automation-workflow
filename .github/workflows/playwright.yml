@@ -174,7 +174,7 @@ jobs:
           PROXY_USERNAME: ${{ secrets.PROXY_USERNAME }}
           PROXY_PASSWORD: ${{ secrets.PROXY_PASSWORD }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID || vars.TELEGRAM_CHAT_ID }}
           GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
           PYTHONUNBUFFERED: '1'
           FORCE_COLOR: '1'
@@ -182,7 +182,10 @@ jobs:
         # Same as package.json "auto" script; extra flags are passed through to playwright.
         # telegramLogStream.js runs it and keeps one Telegram message updated with live logs
         # (final status: passed / failed / cancelled). Exit code is passed through unchanged.
-        run: node src/utils/telegramLogStream.js "📡 Statutory Download #${{ github.run_number }}" -- pnpm auto --reporter=list --retries=0
+        # Block scalar (|) is required: in a plain YAML value " #" starts a comment and
+        # would cut the command off mid-quote.
+        run: |
+          node src/utils/telegramLogStream.js "📡 Statutory Download #${{ github.run_number }}" -- pnpm auto --reporter=list --retries=0
 
       - name: Upload downloaded PDFs
         if: ${{ !cancelled() }}
@@ -215,7 +218,7 @@ jobs:
         if: ${{ failure() || cancelled() }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID || vars.TELEGRAM_CHAT_ID }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
