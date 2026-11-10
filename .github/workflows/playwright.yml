@@ -52,6 +52,7 @@ jobs:
         run: pnpm exec playwright install chromium
 
       - uses: actions/setup-python@v5
+        id: setup-python
         with:
           python-version: '3.13'
 
@@ -59,21 +60,31 @@ jobs:
         with:
           enable-cache: true
 
-      # Cache the entire Python virtualenv so PyTorch and Transformers restore in ~3s
+      # Cache the entire Python virtualenv so PyTorch and Transformers restore in ~3s.
+      # The key includes the exact Python version: a venv links to the interpreter that
+      # created it, so a runner Python update (e.g. 3.13.x -> 3.13.y) breaks an old venv.
       - name: Cache Python virtualenv
         id: cache-venv
         uses: actions/cache@v4
         with:
           path: captcha_reader_model/.venv
-          key: venv-py313-torch-v2
+          key: venv-${{ runner.os }}-py${{ steps.setup-python.outputs.python-version }}-torch-v3
 
+      # Always verify the venv works; rebuild it if the cache is missing or broken.
       - name: Install captcha model dependencies (CPU)
-        if: steps.cache-venv.outputs.cache-hit != 'true'
         run: |
-          uv venv captcha_reader_model/.venv --python 3.13
-          uv pip install --python captcha_reader_model/.venv/bin/python \
+          VENV_PY=captcha_reader_model/.venv/bin/python
+          if [ -x "$VENV_PY" ] && "$VENV_PY" -c "import torch, torchvision, transformers, PIL, pypdfium2, pandas, openpyxl, gspread" 2>/dev/null; then
+            echo "✓ Cached virtualenv is healthy ($("$VENV_PY" --version))."
+            exit 0
+          fi
+          echo "Virtualenv missing or broken, rebuilding..."
+          rm -rf captcha_reader_model/.venv
+          uv venv captcha_reader_model/.venv --python "${{ steps.setup-python.outputs.python-path }}"
+          uv pip install --python "$VENV_PY" \
             --index https://download.pytorch.org/whl/cpu \
             torch torchvision transformers pillow pypdfium2 pandas openpyxl gspread
+          "$VENV_PY" -c "import torch, PIL, transformers; print('✓ Virtualenv ready')"
 
       # Cache downloaded model archive between workflow runs
       - name: Cache captcha model archive
@@ -167,8 +178,11 @@ jobs:
           GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
           PYTHONUNBUFFERED: '1'
           FORCE_COLOR: '1'
-        # Same as package.json "auto" script; extra flags are passed through to playwright
-        run: pnpm auto --reporter=list --retries=0
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        # Same as package.json "auto" script; extra flags are passed through to playwright.
+        # telegramLogStream.js runs it and keeps one Telegram message updated with live logs
+        # (final status: passed / failed / cancelled). Exit code is passed through unchanged.
+        run: node src/utils/telegramLogStream.js "📡 Statutory Download #${{ github.run_number }}" -- pnpm auto --reporter=list --retries=0
 
       - name: Upload downloaded PDFs
         if: ${{ !cancelled() }}
@@ -196,9 +210,9 @@ jobs:
           retention-days: 30
 
       # The scraper sends its own Telegram updates, but failures before it starts
-      # (Tailscale, setup) were silent. This alerts on any failed run.
-      - name: Notify Telegram on failure
-        if: ${{ failure() }}
+      # (Tailscale, setup) were silent. This alerts on any failed or cancelled run.
+      - name: Notify Telegram on failure or cancel
+        if: ${{ failure() || cancelled() }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -208,7 +222,8 @@ jobs:
             echo "Telegram secrets not set (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID), skipping."
             exit 0
           fi
-          TEXT="❌ <b>Statutory Report workflow failed</b>
+          if [ "${{ job.status }}" = "cancelled" ]; then HEAD="⛔ <b>Statutory Report workflow cancelled</b>"; else HEAD="❌ <b>Statutory Report workflow failed</b>"; fi
+          TEXT="$HEAD
           Run #${{ github.run_number }} (${{ github.event_name }})
           <a href=\"$RUN_URL\">Open run logs</a>"
           RESP=$(curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
