@@ -26,7 +26,7 @@ const [cmd, ...cmdArgs] = process.argv.slice(sep + 1);
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN?.trim();
 const CHAT_ID = process.env.TELEGRAM_CHAT_ID?.trim();
 const RUN_URL = process.env.RUN_URL || "";
-const UPDATE_EVERY_MS = 5000; // Telegram allows ~1 edit/sec per chat; 5s is safe
+const UPDATE_EVERY_MS = 2000; // Telegram allows ~1 edit/sec per chat; 2s leaves room for other messages
 const MAX_TAIL_CHARS = 3000; // message limit is 4096 chars incl. header and HTML escaping
 
 const enabled = Boolean(TOKEN && CHAT_ID);
@@ -68,14 +68,26 @@ async function telegram(method, body) {
     signal: AbortSignal.timeout(10000),
   });
   const data = await res.json().catch(() => ({}));
-  if (!data.ok) throw new Error(data.description || `HTTP ${res.status}`);
+  if (!data.ok) {
+    const err = new Error(data.description || `HTTP ${res.status}`);
+    err.retryAfter = data.parameters?.retry_after; // seconds, set on HTTP 429
+    throw err;
+  }
   return data.result;
 }
 
-// Serialize sends so edits never race each other
+let pausedUntil = 0; // Telegram rate-limit backoff (from retry_after)
+let flushQueued = false;
+
+// Serialize sends so edits never race each other, and never queue more than one:
+// each send always uses the latest lines, so a slow send never builds a backlog.
 function flush() {
-  if (!enabled) return Promise.resolve();
+  if (!enabled || flushQueued) return sending;
+  flushQueued = true;
   sending = sending.then(async () => {
+    flushQueued = false;
+    const wait = pausedUntil - Date.now();
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
     const text = buildText();
     if (text === lastSentText) return;
     try {
@@ -86,7 +98,10 @@ function flush() {
       }
       lastSentText = text;
     } catch (err) {
-      if (!String(err.message).includes("not modified")) {
+      if (err.retryAfter) {
+        pausedUntil = Date.now() + err.retryAfter * 1000;
+        process.stderr.write(`[TelegramLogStream] rate limited, pausing ${err.retryAfter}s\n`);
+      } else if (!String(err.message).includes("not modified")) {
         process.stderr.write(`[TelegramLogStream] ${err.message}\n`);
       }
     }
