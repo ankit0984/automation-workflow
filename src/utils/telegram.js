@@ -11,7 +11,6 @@ configDotenv({ path: path.resolve(import.meta.dirname, "../../.env"), quiet: tru
 export async function sendTelegram(message) {
   const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
   const chatId = process.env.TELEGRAM_CHAT_ID?.trim();
-  console.table({ token, chatId })
 
   if (!token || !chatId) {
     console.log(`[Telegram] Skipping notification: TELEGRAM_BOT_TOKEN is ${token ? 'SET' : 'MISSING'}, TELEGRAM_CHAT_ID is ${chatId ? 'SET' : 'MISSING'}`);

@@ -32,12 +32,12 @@ import gspread
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 # Automatically resolve form_10.xlsx location
-if (SCRIPT_DIR / "output" / "form_10.xlsx").exists():
-    DEFAULT_EXCEL_PATH = SCRIPT_DIR / "output" / "form_10.xlsx"
-elif (SCRIPT_DIR / "data_processing" / "output" / "form_10.xlsx").exists():
-    DEFAULT_EXCEL_PATH = SCRIPT_DIR / "data_processing" / "output" / "form_10.xlsx"
+if (SCRIPT_DIR / "output" / "form10_data.xlsx").exists():
+    DEFAULT_EXCEL_PATH = SCRIPT_DIR / "output" / "form10_data.xlsx"
+elif (SCRIPT_DIR / "data_processing" / "output" / "form10_data.xlsx").exists():
+    DEFAULT_EXCEL_PATH = SCRIPT_DIR / "data_processing" / "output" / "form10_data.xlsx"
 else:
-    DEFAULT_EXCEL_PATH = SCRIPT_DIR / "output" / "form_10.xlsx"
+    DEFAULT_EXCEL_PATH = SCRIPT_DIR / "output" / "form10_data.xlsx"
 
 # Automatically find service_account.json or load from env
 SERVICE_ACCOUNT_FILE = None
@@ -94,6 +94,19 @@ def normalize_assembly_name(name: Any) -> str:
     val = re.sub(r"^Bagha\s+Purana$", "Bhagha Purana", val, flags=re.IGNORECASE)
 
     return val
+
+
+def sort_by_generation_date(df: pd.DataFrame) -> pd.DataFrame:
+    """Sort rows by GENERATION DATE (DD/MM/YYYY), oldest first; blank/invalid dates go last."""
+    if "GENERATION DATE" not in df.columns:
+        return df
+    # The master Excel stores real date cells, which read_excel(dtype=str) returns as
+    # "YYYY-MM-DD 00:00:00". Convert them back to DD/MM/YYYY text for the sheet.
+    iso = pd.to_datetime(df["GENERATION DATE"], format="%Y-%m-%d %H:%M:%S", errors="coerce")
+    df["GENERATION DATE"] = iso.dt.strftime("%d/%m/%Y").where(iso.notna(), df["GENERATION DATE"])
+    parsed = pd.to_datetime(df["GENERATION DATE"], format="%d/%m/%Y", errors="coerce")
+    order = parsed.sort_values(kind="stable", na_position="last").index
+    return df.loc[order].reset_index(drop=True)
 
 
 def get_theme_colors(theme: str = "material"):
@@ -153,8 +166,15 @@ def apply_analyst_table_formatting(
         metadata = {}
 
     cleanup_requests = []
+    existing_tables = []
     for sheet in metadata.get("sheets", []):
         if sheet.get("properties", {}).get("sheetId") == sheet_id:
+            existing_tables = sheet.get("tables", [])
+            # A native table keeps its own zebra striping as a banded range, and deleting
+            # that range deletes the table. So only clean up when there is no table yet.
+            if existing_tables:
+                break
+            # Old-style banding / basic filter would block the native table, so remove them
             for br in sheet.get("bandedRanges", []):
                 cleanup_requests.append({"deleteBanding": {"bandedRangeId": br["bandedRangeId"]}})
             if sheet.get("basicFilter"):
@@ -215,7 +235,8 @@ def apply_analyst_table_formatting(
     if df is not None and len(df) > 0:
         for col_name in columns:
             if col_name in df.columns:
-                max_content_len = df[col_name].astype(str).map(len).max()
+                # int(): pandas returns numpy int64, which the Sheets API JSON encoder rejects
+                max_content_len = int(df[col_name].astype(str).map(len).max())
                 header_len = len(col_name)
                 # 8px per character + 55px margin for filter dropdown arrow & cell padding
                 computed_px = max(max_content_len, header_len) * 8 + 55
@@ -325,44 +346,73 @@ def apply_analyst_table_formatting(
                 }
             })
 
-    # H. Native Alternating Colors (Banded Range)
-    requests.append({
-        "addBanding": {
-            "bandedRange": {
-                "range": {
-                    "sheetId": sheet_id,
-                    "startRowIndex": 0,
-                    "endRowIndex": total_rows + 1,
-                    "startColumnIndex": 0,
-                    "endColumnIndex": num_cols,
+    # H. Native Google Sheets Table (Format > Convert to table): brings its own
+    #    header, zebra banding, filter/sort menus and typed columns.
+    table_range = {
+        "sheetId": sheet_id,
+        "startRowIndex": 0,
+        "endRowIndex": total_rows + 1,
+        "startColumnIndex": 0,
+        "endColumnIndex": num_cols,
+    }
+    rows_properties = {
+        "headerColorStyle": {"rgbColor": colors["header_bg"]},
+        "firstBandColorStyle": {"rgbColor": colors["band_1"]},
+        "secondBandColorStyle": {"rgbColor": colors["band_2"]},
+    }
+    # GENERATION DATE is a DATE column (never TEXT: that converts the date values into
+    # text). The DATE type applies a US M/d/yyyy format, so G2 below re-applies
+    # dd/mm/yyyy after the table request. All other columns are TEXT.
+    column_properties = [
+        {"columnIndex": idx, "columnName": col_name, "columnType": "DATE" if col_name == "GENERATION DATE" else "TEXT"}
+        for idx, col_name in enumerate(columns)
+    ]
+    if existing_tables:
+        # Resize the existing table rather than deleting it (deleting could drop its data)
+        requests.append({
+            "updateTable": {
+                "table": {
+                    "tableId": existing_tables[0]["tableId"],
+                    "range": table_range,
+                    "rowsProperties": rows_properties,
+                    "columnProperties": column_properties,
                 },
-                "rowProperties": {
-                    "headerColor": colors["header_bg"],
-                    "firstBandColor": colors["band_1"],
-                    "secondBandColor": colors["band_2"],
-                },
+                "fields": "range,rowsProperties,columnProperties",
             }
-        }
-    })
-
-    # I. Enable Interactive Basic Filter (Dropdown filter & sort menus on headers)
-    requests.append({
-        "setBasicFilter": {
-            "filter": {
-                "range": {
-                    "sheetId": sheet_id,
-                    "startRowIndex": 0,
-                    "endRowIndex": total_rows + 1,
-                    "startColumnIndex": 0,
-                    "endColumnIndex": num_cols,
+        })
+    else:
+        requests.append({
+            "addTable": {
+                "table": {
+                    "name": "Form10_Database",
+                    "range": table_range,
+                    "rowsProperties": rows_properties,
+                    "columnProperties": column_properties,
                 }
             }
-        }
-    })
+        })
+
+    # G2. Show GENERATION DATE serials as DD/MM/YYYY dates (enables date filters/sorting).
+    #     Applied after the table so the table's column type can't override it.
+    if "GENERATION DATE" in columns:
+        date_idx = columns.index("GENERATION DATE")
+        requests.append({
+            "repeatCell": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "startRowIndex": 1,
+                    "endRowIndex": total_rows + 1,
+                    "startColumnIndex": date_idx,
+                    "endColumnIndex": date_idx + 1,
+                },
+                "cell": {"userEnteredFormat": {"numberFormat": {"type": "DATE", "pattern": "dd/mm/yyyy"}}},
+                "fields": "userEnteredFormat.numberFormat",
+            }
+        })
 
     try:
         spreadsheet.batch_update({"requests": requests})
-        print(f"  ✓ Database table formatting applied (Frozen Row 1 & Col A, Filters, Zebra Banding)!")
+        print(f"  ✓ Database formatted as a native Google Sheets table (filters, banding, typed columns)!")
     except Exception as e:
         print(f"  Warning: Could not apply table formatting: {e}", file=sys.stderr)
 
@@ -672,6 +722,7 @@ def push_to_existing_google_sheet(
     df = pd.read_excel(excel_path, dtype=str).fillna("")
     if "Assembly Name" in df.columns:
         df["Assembly Name"] = df["Assembly Name"].apply(normalize_assembly_name)
+    df = sort_by_generation_date(df)
     total_rows = len(df)
     columns = list(df.columns)
     print(f"Loaded {total_rows:,} rows across {len(columns)} columns.")
@@ -734,7 +785,14 @@ def push_to_existing_google_sheet(
     print("Uploading headers...")
     worksheet.update(range_name="A1", values=[columns])
 
-    data_values = df.values.tolist()
+    # Send GENERATION DATE as Google Sheets date serials (days since 1899-12-30), not text,
+    # so the column filters/sorts as real dates. Blank dates stay blank.
+    upload_df = df.copy()
+    if "GENERATION DATE" in upload_df.columns:
+        parsed = pd.to_datetime(upload_df["GENERATION DATE"], format="%d/%m/%Y", errors="coerce")
+        serials = (parsed - pd.Timestamp("1899-12-30")).dt.days
+        upload_df["GENERATION DATE"] = [int(s) if pd.notna(s) else "" for s in serials]
+    data_values = upload_df.values.tolist()
     print(f"Uploading {total_rows:,} rows in batches of {chunk_size:,}...")
     for start_idx in range(0, total_rows, chunk_size):
         end_idx = min(start_idx + chunk_size, total_rows)
@@ -801,6 +859,7 @@ def format_only_google_sheet(
             df = pd.read_excel(excel_path, dtype=str).fillna("")
             if "Assembly Name" in df.columns:
                 df["Assembly Name"] = df["Assembly Name"].apply(normalize_assembly_name)
+            df = sort_by_generation_date(df)
         except Exception:
             pass
 
@@ -826,6 +885,7 @@ def summary_only_google_sheet(
     df = pd.read_excel(excel_path, dtype=str).fillna("")
     if "Assembly Name" in df.columns:
         df["Assembly Name"] = df["Assembly Name"].apply(normalize_assembly_name)
+    df = sort_by_generation_date(df)
 
     print("Authenticating with Google Sheets API...")
     gc = gspread.service_account(filename=str(service_account_path))

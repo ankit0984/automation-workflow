@@ -348,16 +348,24 @@ def extract_records_from_pdf(pdf_path: Path) -> Tuple[Dict[str, str], List[Dict[
 
 
 def parse_date_for_sort(date_str: Any) -> datetime:
-    """Parse date string for chronological sorting."""
+    """Parse date string for chronological sorting. Blank/invalid dates sort last."""
     if not date_str:
-        return datetime.min
+        return datetime.max
+    if isinstance(date_str, datetime):
+        return date_str
     clean = str(date_str).strip()
-    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%d/%m/%y", "%d.%m.%Y"):
+    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%d/%m/%y", "%d.%m.%Y"):
         try:
             return datetime.strptime(clean, fmt)
         except ValueError:
             pass
-    return datetime.min
+    return datetime.max
+
+
+def to_date_text(value: Any) -> str:
+    """Normalize any date value (text or Excel date cell) to 'DD/MM/YYYY'; '' if not a date."""
+    parsed = parse_date_for_sort(value)
+    return "" if parsed == datetime.max else parsed.strftime("%d/%m/%Y")
 
 
 def parse_int_for_sort(val: Any) -> int:
@@ -415,6 +423,7 @@ def save_to_excel(output_excel: Path, all_records: List[Dict[str, Any]], separat
 
     center_align = Alignment(horizontal="center", vertical="center")
     left_align = Alignment(horizontal="left", vertical="center")
+    date_col_idx = EXPECTED_COLUMNS.index("GENERATION DATE") + 1
 
     def create_sheet(sheet_title: str, records: List[Dict[str, Any]]):
         ws = wb.create_sheet(title=sheet_title[:31])  # Excel limits sheet names to 31 chars
@@ -435,9 +444,12 @@ def save_to_excel(output_excel: Path, all_records: List[Dict[str, Any]], separat
             cell.alignment = header_align
             cell.border = header_border
 
-        # Append data rows
+        # Append data rows; GENERATION DATE is written as a real Excel date (not text)
         for rec in records:
-            ws.append([rec.get(col, "") for col in EXPECTED_COLUMNS])
+            row = [rec.get(col, "") for col in EXPECTED_COLUMNS]
+            parsed = parse_date_for_sort(row[date_col_idx - 1])
+            row[date_col_idx - 1] = parsed.date() if parsed != datetime.max else None
+            ws.append(row)
 
         # Style data cells with Google Sheets banded zebra striping
         total_rows = len(records)
@@ -454,6 +466,8 @@ def save_to_excel(output_excel: Path, all_records: List[Dict[str, Any]], separat
                     cell.border = data_border
                     # Center align Form Type, Date, Booth Name, Serial, EPIC
                     cell.alignment = center_align if col_idx in (3, 4, 6, 7, 8) else left_align
+                    if col_idx == date_col_idx:
+                        cell.number_format = "DD/MM/YYYY"
 
         # Auto-fit column widths with pleasant padding
         for col_idx, col_name in enumerate(EXPECTED_COLUMNS, 1):
@@ -495,6 +509,18 @@ def write_run_summary(summary_file: Path, **summary):
     summary["finished_at"] = datetime.now().isoformat()
     with open(summary_file, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
+
+    # Always end the run with a clear new / total records report
+    print("\n" + "=" * 60)
+    print("RUN SUMMARY")
+    print("=" * 60)
+    print(f"PDFs found / parsed:   {summary.get('pdfs_total', 0)} / {summary.get('pdfs_parsed', 0)}")
+    print(f"New records added:     {summary.get('new_records', 0)}")
+    for date, count in (summary.get("new_records_by_date") or {}).items():
+        print(f"    {date or 'unknown date'}: {count}")
+    print(f"Total records:         {summary.get('total_records', 0)}")
+    print(f"Google Sheet sync:     {summary.get('sheet_status', 'not_run')}")
+    print("=" * 60)
 
 
 def sync_google_sheet(output_excel: Path, header: str) -> str:
@@ -570,6 +596,8 @@ def process_district_pdfs(
             for row in df_old.to_dict("records"):
                 rec = {col: clean_text(row.get(col, "")) for col in EXPECTED_COLUMNS}
                 rec["Assembly Name"] = normalize_assembly_name(rec.get("Assembly Name", ""))
+                # Date cells come back as "YYYY-MM-DD 00:00:00"; keep DD/MM/YYYY so dedup keys match new PDFs
+                rec["GENERATION DATE"] = to_date_text(rec["GENERATION DATE"])
                 all_records.append(rec)
                 key = (
                     rec["DISTRICT"],

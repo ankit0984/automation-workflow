@@ -5,9 +5,11 @@
   "main": "index.js",
   "scripts": {
     "automation": "playwright test src/tests/autoCaptchaDownload.spec.js --headed --project=chromium",
+    "auto": "playwright test src/tests/autoCaptchaDownload.spec.js --project=chromium",
     "report": "pnpm exec playwright show-report",
     "form9check": "node src/form9Check.js",
     "form10check": "node src/form10Check.js",
+    "form10daycheck": "node src/form10DayWiseCheck.js",
     "zip_data": "node src/zipDayWise.js",
     "zip_district": "node src/zipDayWise.js --date",
     "data:analyze": "node src/deleteDateFiles.js --analyze",

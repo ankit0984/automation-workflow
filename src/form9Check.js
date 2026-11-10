@@ -6,7 +6,7 @@ import data from "../data/districts_and_constituencies_s19.json" with {
 };
 
 // Check for target directory (prefer specific form9_data folder if present)
-const defaultDir = "./data/form9_data";
+const defaultDir = "./data/form9_23-25_oct";
 const dirPath = fs.existsSync(defaultDir) ? defaultDir : "./data";
 
 // Optional CLI arguments: --date YYYY-MM-DD

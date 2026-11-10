@@ -9,9 +9,6 @@ export function formattedDate() {
     return dateObject.toISOString().split('T')[0]; 
 }
 
-// Now call the function and log its returned value
-console.log(formattedDate());
-
 export function formattedYesterday() {
     // Get the current date
     const now = new Date();
@@ -23,5 +20,3 @@ export function formattedYesterday() {
     return now.toISOString().split('T')[0];
 }
 
-// Example usage:
-console.log(formattedYesterday());

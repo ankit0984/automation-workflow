@@ -98,16 +98,16 @@ jobs:
       # Connect to Tailscale only right before running tests so all 2.5GB dependencies download fast on GitHub CDN
       - name: Connect to Tailscale
         if: ${{ env.TAILSCALE_AUTHKEY != '' }}
+        # Fail fast instead of hanging until the runner loses contact (~45 min)
+        timeout-minutes: 5
         uses: tailscale/github-action@v3
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
 
       - name: Configure Tailscale Exit Node (Mac with Android Failover)
         if: ${{ env.TAILSCALE_AUTHKEY != '' }}
+        timeout-minutes: 5
         run: |
-          echo "=== Tailscale Network Status ==="
-          tailscale status || true
-
           echo "=== Available Exit Nodes ==="
           tailscale exit-node list || true
 
@@ -115,36 +115,33 @@ jobs:
           MAC=$(echo "${MAC_NODE:-100.108.30.75}" | tr -d '[:space:]')
           ANDROID=$(echo "${ANDROID_NODE:-100.125.5.44}" | tr -d '[:space:]')
 
+          # Route through one exit node and wait until traffic really leaves from India.
+          # A phone/Mac route can take 10-30s to come up, so retry instead of one 5s check.
+          try_exit_node() {
+            local label="$1" node="$2"
+            [ -z "$node" ] && return 1
+            if tailscale status 2>/dev/null | grep -F "$node " | grep -q "offline"; then
+              echo "⚠️ $label exit node is offline in Tailscale, skipping."
+              return 1
+            fi
+            echo "Routing through $label exit node..."
+            sudo tailscale set --exit-node="$node" --exit-node-allow-lan-access=true || return 1
+            for attempt in 1 2 3 4 5 6; do
+              sleep 5
+              COUNTRY=$(curl -s --max-time 10 https://ipinfo.io/country | tr -d '[:space:]' || true)
+              echo "  attempt $attempt: egress country via $label = '${COUNTRY:-no response}'"
+              if [ "$COUNTRY" = "IN" ]; then
+                echo "✓ Routed through $label Indian exit node!"
+                return 0
+              fi
+            done
+            echo "⚠️ $label did not route traffic through India."
+            return 1
+          }
+
           route_success=false
-
-          # 1. Try Mac Exit Node
-          if [ -n "$MAC" ]; then
-            echo "Attempting to route through Mac exit node: $MAC..."
-            sudo tailscale set --exit-node="$MAC" --exit-node-allow-lan-access=true || true
-            sleep 2
-            COUNTRY=$(curl -s --max-time 5 https://ipinfo.io/country | tr -d '[:space:]' || true)
-            echo "Egress Country via Mac: '$COUNTRY'"
-            if [ "$COUNTRY" = "IN" ]; then
-              echo "✓ Successfully routed through Mac Indian exit node!"
-              route_success=true
-            else
-              echo "⚠️ Mac is not routing traffic to India (got '$COUNTRY')."
-            fi
-          fi
-
-          # 2. Try Android Exit Node if Mac failed
-          if [ "$route_success" = false ] && [ -n "$ANDROID" ]; then
-            echo "Failing over: Attempting to route through Android exit node: $ANDROID..."
-            sudo tailscale set --exit-node="$ANDROID" --exit-node-allow-lan-access=true || true
-            sleep 2
-            COUNTRY=$(curl -s --max-time 5 https://ipinfo.io/country | tr -d '[:space:]' || true)
-            echo "Egress Country via Android: '$COUNTRY'"
-            if [ "$COUNTRY" = "IN" ]; then
-              echo "✓ Successfully routed through Android Indian exit node!"
-              route_success=true
-            else
-              echo "⚠️ Android is not routing traffic to India (got '$COUNTRY')."
-            fi
+          if try_exit_node "Mac" "$MAC" || try_exit_node "Android" "$ANDROID"; then
+            route_success=true
           fi
 
           echo "=== Final Public IP Verification ==="
@@ -196,3 +193,25 @@ jobs:
           name: playwright-report-${{ github.run_number }}
           path: playwright-report/
           retention-days: 30
+
+      # The scraper sends its own Telegram updates, but failures before it starts
+      # (Tailscale, setup) were silent. This alerts on any failed run.
+      - name: Notify Telegram on failure
+        if: ${{ failure() }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "Telegram secrets not set (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID), skipping."
+            exit 0
+          fi
+          TEXT="❌ <b>Statutory Report workflow failed</b>
+          Run #${{ github.run_number }} (${{ github.event_name }})
+          <a href=\"$RUN_URL\">Open run logs</a>"
+          RESP=$(curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=${TEXT}" \
+            --data-urlencode "parse_mode=HTML")
+          echo "$RESP" | grep -q '"ok":true' && echo "✓ Telegram alert sent." || echo "⚠️ Telegram API response: $RESP"

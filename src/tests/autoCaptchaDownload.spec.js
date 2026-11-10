@@ -48,8 +48,9 @@ const FORM_TYPE = 'form10';
 // Dates configuration
 // true = download only yesterday's report (formattedYesterday), false = use START_DATE / END_DATE below
 const USE_YESTERDAY = true;
-const START_DATE = '2026-09-07';
-const END_DATE = null; // null uses maximum allowed date from calendar
+// const START_DATE = '2026-11-08';
+// const END_DATE = '2026-11-09'; // null uses maximum allowed date from calendar
+
 
 // Destination directories
 const BASE_DOWNLOAD_DIR = 'data';
@@ -110,19 +111,7 @@ function getNextCaptchaIndex(existingRecords) {
   return maxIndex + 1;
 }
 
-// Helper: Keep kpi/index.html in sync with data/captcha_data.json
-function syncKpiHtml(records) {
-  const kpiFile = path.join('kpi', 'index.html');
-  if (!fs.existsSync(kpiFile)) return;
-  try {
-    let html = fs.readFileSync(kpiFile, 'utf-8');
-    const regex = /(<script id="embedded-data" type="application\/json">)[\s\S]*?(<\/script>)/;
-    if (regex.test(html)) {
-      html = html.replace(regex, `$1\n${JSON.stringify(records)}\n  $2`);
-      fs.writeFileSync(kpiFile, html, 'utf-8');
-    }
-  } catch {}
-}
+
 
 // Helper: Resolve python virtual environment executable
 function getPythonExecutable() {
@@ -338,7 +327,7 @@ async function fillCaptchaOneByOne(page, captchaInput, text, delayMs = TYPING_DE
 // =========================================================================
 // 🚀 Automated Statutory Report Downloader with Verified CAPTCHA Storage
 // =========================================================================
-test('Form Automation & Statutory Report Downloader with AI Captcha Solver', async ({ page }) => {
+test('Form Automation & Statutory Report Downloader with AI Captcha Solver', async ({ page, browser }) => {
   test.setTimeout(0); // Disable overall timeout for full batch run
 
   // Handle any unexpected alert dialogs automatically
@@ -678,7 +667,6 @@ test('Form Automation & Statutory Report Downloader with AI Captcha Solver', asy
 
               fs.writeFileSync(CAPTCHA_DATA_JSON, JSON.stringify(allRecords, null, 2), 'utf-8');
               fs.writeFileSync(CAPTCHA_LABELS_JSON, JSON.stringify(labelMap, null, 2), 'utf-8');
-              syncKpiHtml(allRecords);
 
               console.log(`  🏷️ Saved verified image: ${permanentFilename} ➔ Label: "${predictedText}" [Total: ${allRecords.length}]`);
               districtDownloadedCount++;
@@ -715,6 +703,12 @@ test('Form Automation & Statutory Report Downloader with AI Captcha Solver', asy
     }
 
     console.log('\n🏁 Finished processing all Districts, Assembly Constituencies, and Dates!');
+
+    // Downloads are done: release the browser and model before the long post-processing pipeline
+    await browser.close();
+    worker.stop();
+    console.log('🧹 Browser closed and Captcha Model Worker stopped.');
+
     await sendTelegram(`🏁 <b>All Statutory Reports Downloaded!</b>\n📊 Total Verified PDFs: <b>${allRecords.length}</b>\n🔄 Syncing to Excel & Google Sheets...`);
 
     // Post-download validation and data extraction
