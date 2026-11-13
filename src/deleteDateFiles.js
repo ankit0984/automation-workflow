@@ -4,7 +4,7 @@ import readline from "node:readline";
 
 // ======================== CONFIGURATION ========================
 // 1. Manually specify your target date or date range here:
-export const START_DATE = "2026-10-30"; // Start date (YYYY-MM-DD)
+export const START_DATE = "2026-11-12"; // Start date (YYYY-MM-DD)
 export const END_DATE = null;   // End date (YYYY-MM-DD), or set to null / same as START_DATE for a single day
 
 // 2. Set to true for a dry-run preview (scans and counts files, but deletes nothing)

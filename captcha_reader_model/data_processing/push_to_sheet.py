@@ -128,11 +128,11 @@ def get_theme_colors(theme: str = "material"):
         }
     else:  # "material" - Google Sheets Executive Clean
         return {
-            "header_bg": {"red": 0.910, "green": 0.918, "blue": 0.929},  # #E8EAED
-            "header_fg": {"red": 0.125, "green": 0.129, "blue": 0.141},  # #202124
+            "header_bg": {"red": 0.204, "green": 0.659, "blue": 0.325},  # #34A853 (Google green)
+            "header_fg": {"red": 1.0, "green": 1.0, "blue": 1.0},  # #FFFFFF
             "band_1": {"red": 1.0, "green": 1.0, "blue": 1.0},
             "band_2": {"red": 0.973, "green": 0.976, "blue": 0.980},  # #F8F9FA
-            "divider": {"red": 0.741, "green": 0.757, "blue": 0.776}, # #BDC1C6
+            "divider": {"red": 0.094, "green": 0.502, "blue": 0.220},  # #188038 (dark green)
         }
 
 

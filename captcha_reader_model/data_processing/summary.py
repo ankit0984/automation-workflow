@@ -48,7 +48,8 @@ DEFAULT_INPUT_DIRS = [
     DATA_ROOT / "form10_data"
     ]
 DEFAULT_MAPPING_FILE = DATA_ROOT / "districts_and_constituencies.json"
-DEFAULT_OUTPUT_FILE = DATA_ROOT / "form10_daily_records_summary.xlsx"
+# Same output folder as extract_form10_data.py (data_processing/output)
+DEFAULT_OUTPUT_FILE = Path(__file__).resolve().parent / "output" / "form10_daily_records_summary.xlsx"
 DEFAULT_TEMPLATE_FILE = DATA_ROOT / "Voter Data FORM 9 & 10(Form 10).csv"
 
 FILENAME_PATTERN = re.compile(r"form\d+-([A-Za-z0-9]+)-(\d+)-(\d{4})-(\d{2})-(\d{2})", re.IGNORECASE)

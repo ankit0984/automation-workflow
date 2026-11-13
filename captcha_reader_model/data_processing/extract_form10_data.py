@@ -395,17 +395,17 @@ def save_to_excel(output_excel: Path, all_records: List[Dict[str, Any]], separat
     # Remove default sheet
     wb.remove(wb.active)
 
-    # Google Sheets Material Design Theme
-    header_fill = PatternFill(start_color="E8EAED", end_color="E8EAED", fill_type="solid")
-    header_font = Font(name="Arial", size=10, bold=True, color="202124")
+    # Header row: Google green (#34A853) with white bold text for contrast
+    header_fill = PatternFill(start_color="34A853", end_color="34A853", fill_type="solid")
+    header_font = Font(name="Arial", size=10, bold=True, color="FFFFFF")
     header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    
-    # Google Sheets freeze bar / bottom border for headers
+
+    # Header borders: green dividers, darker green line under the header
     header_border = Border(
-        left=Side(style="thin", color="E0E0E0"),
-        right=Side(style="thin", color="E0E0E0"),
-        top=Side(style="thin", color="E0E0E0"),
-        bottom=Side(style="medium", color="BDC1C6"),
+        left=Side(style="thin", color="2D9249"),
+        right=Side(style="thin", color="2D9249"),
+        top=Side(style="thin", color="2D9249"),
+        bottom=Side(style="medium", color="188038"),
     )
 
     # Data row fonts and borders

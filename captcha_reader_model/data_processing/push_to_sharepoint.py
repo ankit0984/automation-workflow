@@ -20,7 +20,7 @@ One-time setup (Azure / Entra app registration, no client secret needed):
 
 Usage:
     python push_to_sharepoint.py "<workbook url>"
-    python push_to_sharepoint.py "<workbook url>" --excel-path ../../data/form10_daily_records_summary.xlsx
+    python push_to_sharepoint.py "<workbook url>" --excel-path output/form10_daily_records_summary.xlsx
     SHAREPOINT_WORKBOOK_URL="<workbook url>" python push_to_sharepoint.py
 """
 

@@ -1,7 +1,7 @@
 # SharePoint / OneDrive Push — Setup Guide
 
 `push_to_sharepoint.py` uploads a local Excel file (for example `output/form10_data.xlsx` or
-`data/form10_daily_records_summary.xlsx`) over an existing workbook in SharePoint or OneDrive.
+`output/form10_daily_records_summary.xlsx`) over an existing workbook in SharePoint or OneDrive.
 
 It signs in as **your own Microsoft account**. Any workbook you can edit in the browser, the script can update.
 
@@ -142,7 +142,7 @@ python3 push_to_sharepoint.py "<master workbook url>"
 
 # Daily records summary
 python3 push_to_sharepoint.py "<summary workbook url>" \
-  --excel-path ../../data/form10_daily_records_summary.xlsx
+  --excel-path output/form10_daily_records_summary.xlsx
 
 # Use SHAREPOINT_WORKBOOK_URL instead of passing the URL
 python3 push_to_sharepoint.py
